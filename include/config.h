@@ -56,9 +56,14 @@ constexpr float   BATT_IIR_ALPHA         = 0.1f;   ///< Low-pass filter coeffici
 #define LTE_USER               ""
 #define LTE_PASS               ""
 
-// Endpoint that accepts JSON POST — store real URL in secrets.h (git-ignored)
-#ifndef SERVER_URL
-#  define SERVER_URL           "https://example.com/api/v1/track"
+// Server endpoint — store real values in a git-ignored secrets.h.
+// SERVER_HOST must be a bare hostname or IP (no scheme, no path).
+// SERVER_PATH must begin with '/'.
+#ifndef SERVER_HOST
+#  define SERVER_HOST          "example.com"
+#endif
+#ifndef SERVER_PATH
+#  define SERVER_PATH          "/api/v1/track"
 #endif
 #ifndef SERVER_PORT
 #  define SERVER_PORT          443

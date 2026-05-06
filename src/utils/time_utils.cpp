@@ -21,14 +21,21 @@ uint32_t TimeUtils::parseCclk(const char* cclk) {
     // Expected: "yy/MM/dd,hh:mm:ss±zz"  (surrounding quotes may be present)
     if (!cclk) return 0;
 
-    int yy, mo, dd, hh, mm, ss, tz;
-    char sign;
-    int matched = sscanf(cclk, "\"%d/%d/%d,%d:%d:%d%c%d\"",
+    // Width limits (%2d, %1c, %2d) prevent int overflow from oversized fields.
+    // sign and tz are initialised so that matched==7 (no tz field) is safe.
+    int  yy = 0, mo = 0, dd = 0, hh = 0, mm = 0, ss = 0, tz = 0;
+    char sign = '+';
+    int matched = sscanf(cclk, "\"%2d/%2d/%2d,%2d:%2d:%2d%1c%2d\"",
                          &yy, &mo, &dd, &hh, &mm, &ss, &sign, &tz);
-    if (matched < 7) return 0;
+    // Require at least the 6 date/time fields; tz offset is optional
+    if (matched < 6) return 0;
+
+    // Sanity-check calendar fields before feeding to mktime
+    if (mo < 1 || mo > 12 || dd < 1 || dd > 31) return 0;
+    if (hh > 23 || mm > 59 || ss > 60)           return 0;
 
     struct tm t{};
-    t.tm_year = yy + 100;  // 2-digit year, offset from 1900
+    t.tm_year = yy + 100;  // 2-digit year offset from 1900
     t.tm_mon  = mo - 1;
     t.tm_mday = dd;
     t.tm_hour = hh;
@@ -36,12 +43,18 @@ uint32_t TimeUtils::parseCclk(const char* cclk) {
     t.tm_sec  = ss;
 
     time_t epoch = mktime(&t);  // NB: mktime uses local time; ensure TZ=UTC
+    if (epoch == (time_t)-1) return 0;
 
-    // Adjust for reported UTC offset (quarters of an hour)
-    int offsetSec = (tz * 15 * 60);
-    if (sign == '-') epoch += offsetSec;
-    else             epoch -= offsetSec;
+    // Adjust for UTC offset only when the tz field was actually parsed
+    if (matched == 8) {
+        // tz is in quarter-hours; clamp to ±56 (±14 h) to prevent overflow
+        if (tz < 0 || tz > 56) tz = 0;
+        long offsetSec = static_cast<long>(tz) * 15L * 60L;
+        if (sign == '-') epoch += static_cast<time_t>(offsetSec);
+        else             epoch -= static_cast<time_t>(offsetSec);
+    }
 
+    if (epoch < 0) return 0;
     return static_cast<uint32_t>(epoch);
 }
 

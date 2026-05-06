@@ -4,8 +4,13 @@
 // ---------------------------------------------------------------------------
 
 bool RetryManager::tick() {
-    if (_queue.empty())              return false;
-    if (millis() < _nextAttemptMs)  return false;
+    if (_queue.empty()) return false;
+    // Use unsigned subtraction so the comparison is correct across the ~49.7-day
+    // millis() rollover (when millis() wraps back below _nextAttemptMs).
+    if (_nextAttemptMs != 0 &&
+            static_cast<uint32_t>(millis() - _nextAttemptMs) > 0x7FFFFFFFUL) {
+        return false;
+    }
 
     GPSRecord rec;
     if (!_queue.peek(rec)) return false;
@@ -45,7 +50,8 @@ bool RetryManager::tick() {
 // ---------------------------------------------------------------------------
 
 bool RetryManager::isBackingOff() const {
-    return millis() < _nextAttemptMs;
+    if (_nextAttemptMs == 0) return false;
+    return static_cast<uint32_t>(millis() - _nextAttemptMs) > 0x7FFFFFFFUL;
 }
 
 // ---------------------------------------------------------------------------

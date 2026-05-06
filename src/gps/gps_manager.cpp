@@ -22,7 +22,14 @@ void GpsManager::begin() {
 bool GpsManager::poll() {
     bool gotNewFix = false;
 
-    while (GpsSerial.available() > 0) {
+    // Cap bytes consumed per call so a flooded/noisy UART cannot stall the
+    // main loop indefinitely.  At 9600 baud, 256 bytes takes ~27 ms — well
+    // within one loop iteration budget.  Any remaining bytes are drained on
+    // the next call.
+    constexpr int kMaxBytesPerPoll = 256;
+    int budget = kMaxBytesPerPoll;
+
+    while (budget-- > 0 && GpsSerial.available() > 0) {
         char c = static_cast<char>(GpsSerial.read());
         if (_gps.encode(c)) {
             // TinyGPS+ has finished parsing a full NMEA sentence
@@ -37,7 +44,8 @@ bool GpsManager::poll() {
     }
 
     // Warn every 30 s if no characters arrive at all (module power issue?)
-    if (millis() - _lastPollMs > 30000 && _gps.charsProcessed() < 10) {
+    if (static_cast<uint32_t>(millis() - _lastPollMs) > 30000
+            && _gps.charsProcessed() < 10) {
         Serial.println(F("[GPS] Warning: no NMEA data received — check wiring"));
     }
     _lastPollMs = millis();
@@ -81,8 +89,10 @@ bool GpsManager::_buildRecord() {
     t.tm_hour = _gps.time.hour();
     t.tm_min  = _gps.time.minute();
     t.tm_sec  = _gps.time.second();
-    time_t epoch = mktime(&t);   // mktime treats struct tm as local time;
-                                 // GPS provides UTC, so TZ must be set to UTC.
+    // mktime uses local time; TZ must be set to UTC (done in setup()).
+    time_t epoch = mktime(&t);
+    // mktime returns -1 on error; a negative epoch would corrupt the timestamp.
+    if (epoch <= 0) return false;
 
     _record.timestamp   = static_cast<uint32_t>(epoch);
     _record.latitude    = _gps.location.lat();
