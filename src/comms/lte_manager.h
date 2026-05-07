@@ -4,6 +4,7 @@
 
 // TinyGSM — include before the modem-specific define is evaluated
 #define TINY_GSM_MODEM_SIM7600
+#define TINY_GSM_USE_SSL        // Enable SSL support in TinyGSM
 #include <TinyGsmClient.h>
 #include <ArduinoHttpClient.h>
 
@@ -50,8 +51,8 @@ public:
     void shutdown();
 
 private:
-    TinyGsm       _modem;
-    TinyGsmClient _gsmClient;
+    TinyGsm            _modem;
+    TinyGsmClientSecure _gsmClient;  // SSL/TLS — certificate verified by modem stack
 
     bool _powerOn();
     bool _connectBearer();

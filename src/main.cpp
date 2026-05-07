@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include <esp_task_wdt.h>
 
 #include "../include/config.h"
 #include "gps/gps_manager.h"
@@ -23,9 +24,10 @@ static RetryManager   retry(lte, queue);
 
 // ---------------------------------------------------------------------------
 // Timing state
+// millis()-safe comparison: (uint32_t)(now - last) >= interval handles the
+// ~49.7-day wrap correctly because unsigned subtraction wraps in the same way.
 // ---------------------------------------------------------------------------
 static uint32_t lastRecordMs  = 0;
-static uint32_t lastDisplayMs = 0;
 
 // ---------------------------------------------------------------------------
 // Forward declarations
@@ -45,20 +47,35 @@ void setup() {
     setenv("TZ", "UTC0", 1);
     tzset();
 
+    // Hardware watchdog — resets the device if loop() stalls longer than
+    // WATCHDOG_TIMEOUT_MS (e.g. blocked modem AT command, infinite retry loop).
+    esp_task_wdt_config_t wdt_cfg = {
+        .timeout_ms   = WATCHDOG_TIMEOUT_MS,
+        .idle_core_mask = 0,
+        .trigger_panic  = true,
+    };
+    esp_task_wdt_reconfigure(&wdt_cfg);
+    esp_task_wdt_add(nullptr);  // Subscribe the current (main) task
+
     initHardware();
 }
 
 // ---------------------------------------------------------------------------
 
 void loop() {
+    // Pat the watchdog at the start of every loop so blocking sections
+    // (modem, SD) don't inadvertently trigger a reset mid-operation.
+    esp_task_wdt_reset();
+
     // 1. Feed the GPS UART parser — must run every iteration
     gps.poll();
 
     // 2. Sample battery (cheap ADC read + IIR update)
     BatteryStatus batt = battery.sample();
 
-    // 3. Capture a new GPS record on the configured interval
-    if (millis() - lastRecordMs >= GPS_RECORD_INTERVAL_MS) {
+    // 3. Capture a new GPS record on the configured interval.
+    //    Cast to uint32_t makes the subtraction wrap-safe across millis() rollover.
+    if (static_cast<uint32_t>(millis() - lastRecordMs) >= GPS_RECORD_INTERVAL_MS) {
         captureAndEnqueue();
         lastRecordMs = millis();
     }

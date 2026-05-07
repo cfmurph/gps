@@ -14,7 +14,11 @@ bool SdLogger::begin() {
 
     // Ensure log directory exists
     if (!SD.exists(SD_LOG_DIR)) {
-        SD.mkdir(SD_LOG_DIR);
+        if (!SD.mkdir(SD_LOG_DIR)) {
+            Serial.println(F("[SD] Failed to create log directory"));
+            _available = false;
+            return false;
+        }
     }
 
     _available = true;
@@ -117,6 +121,7 @@ bool SdLogger::_openFile(uint32_t epoch) {
         return false;
     }
     strncpy(_currentPath, path, sizeof(_currentPath) - 1);
+    _currentPath[sizeof(_currentPath) - 1] = '\0';  // Guarantee NUL termination
 
     if (!existed) {
         _writeHeader();

@@ -64,27 +64,38 @@ RetryResult LteManager::postRecord(const GPSRecord& rec) {
         if (!reconnect()) return RetryResult::TRANSIENT_FAIL;
     }
 
-    // Serialise to JSON
+    // Serialise to JSON — use native numeric types to avoid String heap churn
     JsonDocument doc;
     doc["device_id"] = DEVICE_ID;
     doc["ts"]        = rec.timestamp;
-    doc["lat"]       = serialized(String(rec.latitude,  6));
-    doc["lon"]       = serialized(String(rec.longitude, 6));
-    doc["alt_m"]     = serialized(String(rec.altitude_m,  1));
-    doc["speed_kmh"] = serialized(String(rec.speed_kmh,   1));
-    doc["heading"]   = serialized(String(rec.heading_deg, 1));
-    doc["hdop"]      = serialized(String(rec.hdop,        2));
+    doc["lat"]       = rec.latitude;
+    doc["lon"]       = rec.longitude;
+    doc["alt_m"]     = rec.altitude_m;
+    doc["speed_kmh"] = rec.speed_kmh;
+    doc["heading"]   = rec.heading_deg;
+    doc["hdop"]      = rec.hdop;
     doc["sats"]      = rec.satellites;
     doc["batt_pct"]  = rec.battery_pct;
 
-    char body[256];
-    serializeJson(doc, body, sizeof(body));
+    // Measure required size before serialising to catch truncation
+    const size_t needed = measureJson(doc) + 1;
+    if (needed > 512) {
+        Serial.println(F("[LTE] JSON payload too large — discarding record"));
+        return RetryResult::PERMANENT_FAIL;
+    }
+    char body[512];
+    size_t written = serializeJson(doc, body, sizeof(body));
+    if (written == 0 || written >= sizeof(body)) {
+        Serial.println(F("[LTE] JSON serialisation failed"));
+        return RetryResult::PERMANENT_FAIL;
+    }
 
-    HttpClient http(_gsmClient, SERVER_URL, SERVER_PORT);
+    // HttpClient constructor expects bare hostname (no scheme/path) + port
+    HttpClient http(_gsmClient, SERVER_HOST, SERVER_PORT);
     http.setTimeout(HTTP_TIMEOUT_MS);
     http.connectionKeepAlive();
 
-    int err = http.post("/api/v1/track",
+    int err = http.post(SERVER_PATH,
                         "application/json",
                         body);
 
