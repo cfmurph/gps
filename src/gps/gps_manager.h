@@ -36,6 +36,20 @@ public:
     /** Milliseconds since the last valid fix was captured (for staleness checks). */
     uint32_t msSinceLastFix() const;
 
+    /**
+     * Power-save duty-cycle helper.
+     *
+     * Powers the GPS module ON, polls until a valid fix is obtained or
+     * timeoutMs elapses, then powers the module OFF again.
+     *
+     * Use this instead of the always-on poll() approach when the device is
+     * in a power-saving mode.  Returns true if a valid fix was captured.
+     * The fix is available via latestRecord() after a successful call.
+     *
+     * @param timeoutMs  Maximum milliseconds to wait for a fix.
+     */
+    bool acquireFix(uint32_t timeoutMs);
+
     /** Power-cycle the GPS module (useful after extended signal loss). */
     void reset();
 

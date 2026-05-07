@@ -47,6 +47,14 @@ public:
     /** Fill in the caller's ModemStatus struct from current modem state. */
     void fillStatus(ModemStatus& out, uint8_t pendingRecords = 0);
 
+    /**
+     * Drop the GPRS bearer without powering down the modem.
+     * In power-save modes, call this after draining the upload queue so the
+     * modem idle current (~5–15 mA) is eliminated between batch uploads.
+     * Reconnect with reconnect() before the next batch.
+     */
+    void disconnectBearer();
+
     /** Gracefully detach from bearer and power down the modem. */
     void shutdown();
 
