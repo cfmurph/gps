@@ -25,11 +25,19 @@ static QueueManager     queue;
 static RetryManager     retry(lte, queue);
 
 // ---------------------------------------------------------------------------
-// Timing state
-// millis()-safe comparison: (uint32_t)(now - last) >= interval handles the
-// ~49.7-day wrap correctly because unsigned subtraction wraps in the same way.
+// Per-subsystem timing state
+// All millis() comparisons use unsigned subtraction to survive the ~49.7-day
+// counter rollover: (uint32_t)(now - last) >= interval.
 // ---------------------------------------------------------------------------
-static uint32_t lastCaptureMs = 0;
+static uint32_t lastCaptureMs     = 0;
+static uint32_t lastBattSampleMs  = 0;
+static uint32_t lastDisplayMs     = 0;
+static uint32_t lastModemStatusMs = 0;
+static uint32_t lastPostMs        = 0;
+
+// Latest snapshots refreshed at their own rates
+static BatteryStatus lastBatt{};
+static ModemStatus   lastModem{};
 
 // ---------------------------------------------------------------------------
 // Forward declarations
@@ -49,52 +57,54 @@ void setup() {
     setenv("TZ", "UTC0", 1);
     tzset();
 
-    // Hardware watchdog — resets the device if loop() stalls longer than
-    // WATCHDOG_TIMEOUT_MS (e.g. blocked modem AT command, infinite retry loop).
+    // initHardware() contains slow blocking operations (modem init, ~30 s).
+    // Subscribe to the watchdog AFTER it returns so those operations don't
+    // consume the entire watchdog budget before loop() ever runs.
+    initHardware();
+
     esp_task_wdt_config_t wdt_cfg = {
-        .timeout_ms   = WATCHDOG_TIMEOUT_MS,
+        .timeout_ms    = WATCHDOG_TIMEOUT_MS,
         .idle_core_mask = 0,
         .trigger_panic  = true,
     };
     esp_task_wdt_reconfigure(&wdt_cfg);
-    esp_task_wdt_add(nullptr);  // Subscribe the current (main) task
-
-    initHardware();
+    esp_task_wdt_add(nullptr);
 }
 
 // ---------------------------------------------------------------------------
 
 void loop() {
-    // Pat the watchdog at the start of every loop so blocking sections
-    // (modem, SD) don't inadvertently trigger a reset mid-operation.
     esp_task_wdt_reset();
 
+    const uint32_t now = millis();
+
     // -----------------------------------------------------------------------
-    // 1. Battery sample + power mode evaluation
+    // 1. Battery — sampled at BATTERY_SAMPLE_INTERVAL_MS (2 Hz)
+    //    Avoids 8 ADC reads + IIR every iteration (~every 10 ms).
     // -----------------------------------------------------------------------
-    BatteryStatus batt = battery.sample();
-    psm.evaluate(batt, gps.latestRecord());
+    if (static_cast<uint32_t>(now - lastBattSampleMs) >= BATTERY_SAMPLE_INTERVAL_MS) {
+        lastBatt         = battery.sample();
+        lastBattSampleMs = now;
+        psm.evaluate(lastBatt, gps.latestRecord());
+    }
 
     const PowerMode pmode = psm.mode();
 
     // -----------------------------------------------------------------------
-    // 2. GPS: always-on poll (NORMAL) or duty-cycle window (power-save modes)
+    // 2. GPS — always-on poll (NORMAL) or duty-cycle window (power-save)
     // -----------------------------------------------------------------------
     const uint32_t captureInterval = psm.gpsIntervalMs();
 
-    if (static_cast<uint32_t>(millis() - lastCaptureMs) >= captureInterval) {
+    if (static_cast<uint32_t>(now - lastCaptureMs) >= captureInterval) {
         if (pmode == PowerMode::NORMAL) {
-            // GPS module is always powered — just read whatever arrived
             gps.poll();
             captureRecord();
         } else {
-            // Duty-cycle: power GPS on, block for a fix window, power off
-            // Then light-sleep for the remainder of the capture interval.
             const uint32_t windowMs = psm.gpsFixWindowMs();
             bool gotFix = gps.acquireFix(windowMs);
             if (gotFix) captureRecord();
 
-            // Sleep for the interval minus the time already spent in acquireFix
+            // Light-sleep for the remaining interval
             const uint32_t elapsed = static_cast<uint32_t>(millis() - lastCaptureMs);
             if (captureInterval > elapsed) {
                 psm.doLightSleep(captureInterval - elapsed);
@@ -102,32 +112,48 @@ void loop() {
         }
         lastCaptureMs = millis();
     } else if (pmode == PowerMode::NORMAL) {
-        // In normal mode, poll GPS every loop iteration so the FIFO never overflows
+        // In NORMAL mode, drain GPS UART every iteration so the enlarged 4096-
+        // byte buffer never fills between capture windows.
         gps.poll();
     }
 
     // -----------------------------------------------------------------------
-    // 3. Upload / retry — gated by batch policy
+    // 3. Upload — gated by batch policy and minimum inter-POST interval
     // -----------------------------------------------------------------------
-    serviceUplink();
-
-    // -----------------------------------------------------------------------
-    // 4. Display — suppressed in power-save modes
-    // -----------------------------------------------------------------------
-    if (psm.isDisplaySuppressed()) {
-        display.sleep();
-    } else {
-        ModemStatus modemSnap;
-        lte.fillStatus(modemSnap, queue.size());
-        display.updateBattery(batt);
-        display.updateModem(modemSnap);
-        display.refresh();
-        display.wake();
+    if (static_cast<uint32_t>(now - lastPostMs) >= MIN_POST_INTERVAL_MS) {
+        if (serviceUplink()) {
+            lastPostMs = millis();
+        }
     }
 
     // -----------------------------------------------------------------------
-    // 5. Yield — in power-save modes the light sleep above already yielded
-    //    the CPU; only delay in NORMAL mode to avoid busy-spinning.
+    // 4. Modem status — queried at MODEM_STATUS_INTERVAL_MS (1 Hz)
+    //    Each call issues AT commands over UART; caching avoids stalling
+    //    the loop on every iteration.
+    // -----------------------------------------------------------------------
+    if (!psm.isDisplaySuppressed()
+            && static_cast<uint32_t>(now - lastModemStatusMs) >= MODEM_STATUS_INTERVAL_MS) {
+        lte.fillStatus(lastModem, queue.size());
+        lastModemStatusMs = now;
+    }
+
+    // -----------------------------------------------------------------------
+    // 5. Display — refreshed at DISPLAY_REFRESH_INTERVAL_MS (4 Hz)
+    //    sendBuffer() is ~20 ms of synchronous I2C; calling it every loop
+    //    (~10 ms yield) would pin ~66% of loop time in I2C transfers.
+    // -----------------------------------------------------------------------
+    if (psm.isDisplaySuppressed()) {
+        display.sleep();
+    } else if (static_cast<uint32_t>(now - lastDisplayMs) >= DISPLAY_REFRESH_INTERVAL_MS) {
+        display.updateBattery(lastBatt);
+        display.updateModem(lastModem);
+        display.refresh();
+        display.wake();
+        lastDisplayMs = now;
+    }
+
+    // -----------------------------------------------------------------------
+    // 6. Yield — in power-save modes the light sleep already yielded the CPU.
     // -----------------------------------------------------------------------
     if (pmode == PowerMode::NORMAL) {
         delay(LOOP_YIELD_MS);
@@ -138,7 +164,6 @@ void loop() {
 
 static void initHardware() {
     display.begin();
-
     gps.begin();
 
     bool sdOk = sdLogger.begin();
@@ -147,14 +172,11 @@ static void initHardware() {
     }
 
     battery.begin();
+    lastBatt = battery.status();
 
     queue.begin();
+    psm.begin(lastBatt);
 
-    // Initialise power-save manager from the first battery reading
-    psm.begin(battery.status());
-
-    // LTE init is slow — attempt asynchronously and continue if it fails;
-    // RetryManager will re-establish the bearer before the first POST.
     Serial.println(F("[MAIN] Initialising LTE modem (may take ~30 s)..."));
     if (!lte.begin()) {
         Serial.println(F("[MAIN] LTE init failed — will retry on first upload attempt"));
@@ -171,37 +193,30 @@ static void captureRecord() {
     GPSRecord rec = gps.latestRecord();
     if (!rec.valid) return;
 
-    // Attach battery level to the record before storing/transmitting
-    rec.battery_pct = battery.status().percent;
+    rec.battery_pct = lastBatt.percent;
 
-    // Sync system time from GPS on the first valid fix
     if (!TimeUtils::isSynced() && rec.timestamp > 0) {
         TimeUtils::setTime(rec.timestamp);
     }
 
-    // Log to SD
     sdLogger.log(rec);
-
-    // Enqueue for LTE upload
     queue.push(rec);
-
-    // Keep display GPS snapshot fresh
     display.updateGps(rec);
 }
 
 // ---------------------------------------------------------------------------
 
-static void serviceUplink() {
-    if (!psm.shouldUploadNow(queue.size())) return;
+/** Attempt one upload from the queue. Returns true if a record was delivered. */
+static bool serviceUplink() {
+    if (!psm.shouldUploadNow(queue.size())) return false;
 
-    // Drain as many queued records as possible in one pass
     bool delivered = retry.tick();
 
-    // In power-save modes, disconnect the bearer after the batch is drained
-    // to eliminate modem idle current between upload windows.
-    if (delivered
-            && psm.mode() != PowerMode::NORMAL
-            && queue.empty()) {
+    // In power-save modes, drop the bearer after the queue is empty so the
+    // modem does not draw idle current between batch upload windows.
+    if (delivered && psm.mode() != PowerMode::NORMAL && queue.empty()) {
         lte.disconnectBearer();
     }
+
+    return delivered;
 }

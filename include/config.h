@@ -86,6 +86,20 @@ constexpr uint32_t RETRY_MAX_DELAY_MS     = 60000;
 constexpr uint32_t WATCHDOG_TIMEOUT_MS    = 30000;
 constexpr uint32_t LOOP_YIELD_MS          = 10;
 
+// Minimum interval between successive successful LTE POST attempts.
+// Prevents back-to-back uploads that keep the GPS UART unserviced.
+constexpr uint32_t MIN_POST_INTERVAL_MS   = 2000;
+
+// How often display.refresh() sends the full frame buffer over I2C (~20 ms).
+// There is no point refreshing faster than the human eye or the OLED page cycle.
+constexpr uint32_t DISPLAY_REFRESH_INTERVAL_MS = 250;   // 4 Hz
+
+// How often the modem is queried for RSSI / registration (AT commands).
+constexpr uint32_t MODEM_STATUS_INTERVAL_MS     = 1000;  // 1 Hz
+
+// How often the battery ADC is re-sampled (8 reads + IIR each call).
+constexpr uint32_t BATTERY_SAMPLE_INTERVAL_MS   = 500;   // 2 Hz
+
 // ---------------------------------------------------------------------------
 // Power saving mode
 // ---------------------------------------------------------------------------

@@ -2,6 +2,7 @@
 #include "../../include/config.h"
 #include "../../include/pins.h"
 #include <ArduinoJson.h>
+#include <esp_task_wdt.h>
 
 // UART1 — wired to SIM7600
 static HardwareSerial LteSerial(1);
@@ -50,9 +51,12 @@ bool LteManager::reconnect() {
 
     Serial.println(F("[LTE] Attempting bearer reconnect..."));
 
+    // Pat the watchdog: waitForNetwork can block for LTE_CONNECT_TIMEOUT_MS
+    esp_task_wdt_reset();
     if (!_modem.isNetworkConnected()) {
         if (!_modem.waitForNetwork(LTE_CONNECT_TIMEOUT_MS)) return false;
     }
+    esp_task_wdt_reset();
 
     return _connectBearer();
 }
@@ -95,9 +99,13 @@ RetryResult LteManager::postRecord(const GPSRecord& rec) {
     http.setTimeout(HTTP_TIMEOUT_MS);
     http.connectionKeepAlive();
 
+    // Pat WDT around the blocking POST; the full round-trip (reconnect + POST)
+    // can exceed WATCHDOG_TIMEOUT_MS without these resets.
+    esp_task_wdt_reset();
     int err = http.post(SERVER_PATH,
                         "application/json",
                         body);
+    esp_task_wdt_reset();
 
     if (err != 0) {
         Serial.printf("[LTE] HTTP POST error: %d\n", err);
@@ -106,6 +114,7 @@ RetryResult LteManager::postRecord(const GPSRecord& rec) {
     }
 
     int status = http.responseStatusCode();
+    esp_task_wdt_reset();
     http.skipResponseHeaders();
     http.stop();
 
