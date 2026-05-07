@@ -85,3 +85,35 @@ constexpr uint32_t RETRY_MAX_DELAY_MS     = 60000;
 // ---------------------------------------------------------------------------
 constexpr uint32_t WATCHDOG_TIMEOUT_MS    = 30000;
 constexpr uint32_t LOOP_YIELD_MS          = 10;
+
+// ---------------------------------------------------------------------------
+// Power saving mode
+// ---------------------------------------------------------------------------
+
+// Battery % thresholds at which the mode transitions downward.
+// Hysteresis of PS_HYSTERESIS_PCT prevents rapid toggling near a boundary.
+constexpr uint8_t  PS_SAVING_THRESHOLD_PCT   = 30;  ///< NORMAL  → SAVING
+constexpr uint8_t  PS_CRITICAL_THRESHOLD_PCT = 15;  ///< SAVING  → CRITICAL  (= LOW_BATTERY_THRESHOLD)
+constexpr uint8_t  PS_HYSTERESIS_PCT         = 3;   ///< extra % required to step back up
+
+// GPS duty-cycling: module is powered off between fix windows to save ~20 mA.
+// The acquisition window must be long enough for a warm-start TTFF (~2–5 s).
+constexpr uint32_t PS_GPS_INTERVAL_SAVING_MS   = 30000;  ///< capture every 30 s in SAVING
+constexpr uint32_t PS_GPS_INTERVAL_CRITICAL_MS = 60000;  ///< capture every 60 s in CRITICAL
+constexpr uint32_t PS_GPS_FIX_WINDOW_MS        = 15000;  ///< max time to wait for a fix
+
+// Stationary detection: if speed stays below this for this many consecutive
+// records, double the capture interval further (up to PS_GPS_INTERVAL_CRITICAL_MS).
+constexpr float    PS_STATIONARY_SPEED_KMH  = 1.0f;
+constexpr uint8_t  PS_STATIONARY_COUNT      = 3;
+
+// LTE batching: in power-save modes, accumulate this many records before
+// bringing up the bearer, draining the queue, then disconnecting.
+// In NORMAL mode the bearer stays up and records are uploaded immediately.
+constexpr uint8_t  PS_UPLOAD_BATCH_SAVING   = 6;
+constexpr uint8_t  PS_UPLOAD_BATCH_CRITICAL = 12;
+
+// Light sleep: ESP32 suspends between GPS capture windows.
+// The CPU is halted (~0.8 mA vs ~240 mA active) while RTC and UART
+// peripheral clocks remain on so the GPS UART can wake the chip early.
+constexpr bool     PS_LIGHT_SLEEP_ENABLED   = true;

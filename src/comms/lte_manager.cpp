@@ -126,6 +126,13 @@ void LteManager::fillStatus(ModemStatus& out, uint8_t pendingRecords) {
 
 // ---------------------------------------------------------------------------
 
+void LteManager::disconnectBearer() {
+    Serial.println(F("[LTE] Dropping GPRS bearer (power save)"));
+    _modem.gprsDisconnect();
+}
+
+// ---------------------------------------------------------------------------
+
 void LteManager::shutdown() {
     Serial.println(F("[LTE] Shutting down modem"));
     _modem.gprsDisconnect();

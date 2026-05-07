@@ -49,3 +49,16 @@ enum class RetryResult : uint8_t {
     TRANSIENT_FAIL, ///< Network hiccup — keep in queue, back off
     PERMANENT_FAIL, ///< Malformed payload etc. — discard record
 };
+
+/**
+ * Device power mode managed by PowerSaveManager.
+ *
+ * NORMAL   — full sampling rate, display on, LTE always connected.
+ * SAVING   — GPS duty-cycled with light sleep, display off, LTE batched.
+ * CRITICAL — extended intervals, GPS and LTE only when essential.
+ */
+enum class PowerMode : uint8_t {
+    NORMAL   = 0,
+    SAVING   = 1,
+    CRITICAL = 2,
+};

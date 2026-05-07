@@ -62,6 +62,47 @@ uint32_t GpsManager::msSinceLastFix() const {
 
 // ---------------------------------------------------------------------------
 
+bool GpsManager::acquireFix(uint32_t timeoutMs) {
+    // Power on
+    digitalWrite(PIN_GPS_EN, HIGH);
+    GpsSerial.flush();
+
+    Serial.printf("[GPS] Duty-cycle window: %lu ms\n",
+                  static_cast<unsigned long>(timeoutMs));
+
+    const uint32_t deadline = millis() + timeoutMs;
+    bool gotFix = false;
+
+    while (static_cast<uint32_t>(millis() - deadline) > 0x7FFFFFFFUL) {
+        constexpr int kMaxBytesPerPoll = 256;
+        int budget = kMaxBytesPerPoll;
+        while (budget-- > 0 && GpsSerial.available() > 0) {
+            char c = static_cast<char>(GpsSerial.read());
+            if (_gps.encode(c)) {
+                if (_gps.location.isUpdated()
+                        && _gps.date.isValid()
+                        && _gps.time.isValid()) {
+                    if (_buildRecord()) {
+                        _hasFix    = true;
+                        _lastFixMs = millis();
+                        gotFix     = true;
+                    }
+                }
+            }
+        }
+        if (gotFix) break;
+        delay(10);
+    }
+
+    // Power off regardless of outcome to save current
+    digitalWrite(PIN_GPS_EN, LOW);
+
+    Serial.printf("[GPS] Duty-cycle complete: %s\n", gotFix ? "fix" : "no fix");
+    return gotFix;
+}
+
+// ---------------------------------------------------------------------------
+
 void GpsManager::reset() {
     Serial.println(F("[GPS] Power-cycling module"));
     digitalWrite(PIN_GPS_EN, LOW);
