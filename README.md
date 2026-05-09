@@ -89,4 +89,4 @@ Each GPS record is logged to SD as a CSV row and transmitted as a JSON object:
 
 ## License
 
-MIT
+[MIT](LICENSE)
