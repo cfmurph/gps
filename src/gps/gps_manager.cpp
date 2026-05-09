@@ -12,9 +12,15 @@ void GpsManager::begin() {
     pinMode(PIN_GPS_EN, OUTPUT);
     digitalWrite(PIN_GPS_EN, HIGH);  // Power up the module
 
+    // Enlarge the Rx FIFO before begin() so bytes accumulate safely during
+    // blocking operations (HTTP POST, SD write, I2C).  At 9600 baud the
+    // default 256-byte buffer fills in ~213 ms; 4096 bytes buys ~3.4 s —
+    // enough to survive a typical SD flush or display sendBuffer() without
+    // losing NMEA sentences.
+    GpsSerial.setRxBufferSize(4096);
     GpsSerial.begin(GPS_BAUD, SERIAL_8N1, PIN_GPS_RX, PIN_GPS_TX);
 
-    Serial.println(F("[GPS] UART2 initialised"));
+    Serial.println(F("[GPS] UART2 initialised (Rx buffer 4096 B)"));
 }
 
 // ---------------------------------------------------------------------------
