@@ -60,8 +60,8 @@ bool SdLogger::log(const GPSRecord& rec) {
     }
     _currentBytes += static_cast<uint32_t>(written);
 
-    // Periodic fsync
-    if (millis() - _lastFlushMs >= SD_FLUSH_INTERVAL_MS) {
+    // Periodic fsync (unsigned subtraction handles millis() rollover)
+    if (static_cast<uint32_t>(millis() - _lastFlushMs) >= SD_FLUSH_INTERVAL_MS) {
         flush();
     }
 

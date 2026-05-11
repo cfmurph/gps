@@ -24,18 +24,20 @@ Pin assignments are defined in [`include/pins.h`](include/pins.h).
 
 ```
 main.cpp
-├── GpsManager       — NMEA parsing, fix validation, coordinate smoothing
-├── DisplayManager   — U8g2 OLED pages (status, map, stats)
-├── SdLogger         — CSV rotation, flush policy, file naming by date
-├── BatteryManager   — ADC sampling, IIR filter, charge-state detection
-├── LteManager       — SIM7600 init, bearer bring-up, HTTPS POST
-├── QueueManager     — Ring-buffer of unsent GPSRecord payloads (PSRAM)
-└── RetryManager     — Exponential-backoff retry loop for queued records
+├── GpsManager        — NMEA parsing, fix validation, duty-cycle acquisition
+├── DisplayManager    — U8g2 OLED pages (status, location, stats); rate-limited
+├── SdLogger          — CSV rotation, flush policy, file naming by date
+├── BatteryManager    — ADC sampling, IIR filter, charge-state detection
+├── PowerSaveManager  — Three-tier power mode (NORMAL/SAVING/CRITICAL);
+│                       GPS duty-cycling, LTE batching, ESP32 light sleep
+├── LteManager        — SIM7600 init, bearer bring-up, HTTPS POST (TLS)
+├── QueueManager      — Ring-buffer of unsent GPSRecord payloads (PSRAM/heap)
+└── RetryManager      — Exponential-backoff retry loop for queued records
 ```
 
 Supporting utilities live in `src/utils/`:
 
-- **TimeUtils** — epoch ↔ human-readable conversion, NTP via modem CCLK
+- **TimeUtils** — epoch ↔ human-readable conversion, modem CCLK parsing
 - **CsvWriter** — zero-allocation CSV row builder
 
 ---

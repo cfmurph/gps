@@ -100,14 +100,19 @@ void loop() {
             gps.poll();
             captureRecord();
         } else {
+            // Record the window start BEFORE acquireFix so elapsed time is
+            // measured from the correct reference point.
+            const uint32_t windowStart = millis();
+            lastCaptureMs = windowStart;
+
             const uint32_t windowMs = psm.gpsFixWindowMs();
             bool gotFix = gps.acquireFix(windowMs);
             if (gotFix) captureRecord();
 
-            // Light-sleep for the remaining interval
-            const uint32_t elapsed = static_cast<uint32_t>(millis() - lastCaptureMs);
-            if (captureInterval > elapsed) {
-                psm.doLightSleep(captureInterval - elapsed);
+            // Sleep for the time remaining in the capture interval.
+            const uint32_t acquireTime = static_cast<uint32_t>(millis() - windowStart);
+            if (captureInterval > acquireTime) {
+                psm.doLightSleep(captureInterval - acquireTime);
             }
         }
         lastCaptureMs = millis();
@@ -143,7 +148,9 @@ void loop() {
     //    (~10 ms yield) would pin ~66% of loop time in I2C transfers.
     // -----------------------------------------------------------------------
     if (psm.isDisplaySuppressed()) {
-        display.sleep();
+        // Only call sleep() on the transition, not every loop iteration, to
+        // avoid flooding the I2C bus with repeated setPowerSave(1) commands.
+        if (!display.isSleeping()) display.sleep();
     } else if (static_cast<uint32_t>(now - lastDisplayMs) >= DISPLAY_REFRESH_INTERVAL_MS) {
         display.updateBattery(lastBatt);
         display.updateModem(lastModem);

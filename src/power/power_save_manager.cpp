@@ -111,27 +111,49 @@ bool PowerSaveManager::isDisplaySuppressed() const {
 // ---------------------------------------------------------------------------
 
 void PowerSaveManager::doLightSleep(uint32_t ms) {
-    if (!PS_LIGHT_SLEEP_ENABLED)           return;
-    if (_mode == PowerMode::NORMAL)        return;
-    if (ms < 100)                          return;  // not worth the overhead
+    if (!PS_LIGHT_SLEEP_ENABLED)    return;
+    if (_mode == PowerMode::NORMAL) return;
+    if (ms < 100)                   return;  // not worth the overhead
 
-    esp_task_wdt_reset();
+    // Sleep in chunks no longer than (WATCHDOG_TIMEOUT_MS / 2) so we can
+    // pat the watchdog between chunks.  Without this, long capture intervals
+    // (e.g. 60 s in CRITICAL mode) would exceed the 30 s WDT deadline while
+    // the CPU is suspended.
+    constexpr uint32_t kMaxChunkMs = WATCHDOG_TIMEOUT_MS / 2;
 
-    // Configure timer wakeup
-    esp_sleep_enable_timer_wakeup(static_cast<uint64_t>(ms) * 1000ULL);
+    uint32_t remaining = ms;
+    while (remaining >= 100) {
+        esp_task_wdt_reset();
 
-    // Configure UART2 (GPS) as a wakeup source so an incoming NMEA byte
-    // wakes the CPU before the timer fires — useful once GPS is powered back
-    // on before the sleep ends.
-    esp_sleep_enable_uart_wakeup(UART_NUM_2);
+        const uint32_t chunk = (remaining > kMaxChunkMs) ? kMaxChunkMs : remaining;
 
-    Serial.printf("[PSM] Light sleep %lu ms\n", static_cast<unsigned long>(ms));
-    Serial.flush();
+        // Timer wakeup for this chunk
+        esp_sleep_enable_timer_wakeup(static_cast<uint64_t>(chunk) * 1000ULL);
 
-    esp_light_sleep_start();
+        // UART2 (GPS) wakeup — fires early once the GPS module powers up and
+        // starts sending NMEA (only relevant on the last chunk before GPS on).
+        esp_sleep_enable_uart_wakeup(UART_NUM_2);
 
-    // CPU is back — clear wakeup config for the next sleep
-    esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_TIMER);
+        Serial.printf("[PSM] Light sleep chunk %lu ms (remaining %lu ms)\n",
+                      static_cast<unsigned long>(chunk),
+                      static_cast<unsigned long>(remaining));
+        Serial.flush();
+
+        esp_light_sleep_start();
+
+        // Clear both sources after every chunk to avoid stale wakeup config
+        esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_TIMER);
+        esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_UART);
+
+        const esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
+        if (cause == ESP_SLEEP_WAKEUP_UART) {
+            // GPS module started sending — wake up early to service UART
+            Serial.println(F("[PSM] UART wakeup — exiting sleep early"));
+            break;
+        }
+
+        remaining -= chunk;
+    }
 
     esp_task_wdt_reset();
 }
