@@ -1,0 +1,23 @@
+# PlatformIO build artifacts
+.pio/
+.pioenvs/
+.piolibdeps/
+
+# PlatformIO IDE files
+.vscode/
+*.code-workspace
+.clangd/
+compile_commands.json
+
+# Secrets — never commit real credentials
+src/secrets.h
+include/secrets.h
+
+# macOS
+.DS_Store
+
+# Windows
+Thumbs.db
+
+# Logs
+*.log

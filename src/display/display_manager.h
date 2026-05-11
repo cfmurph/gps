@@ -39,6 +39,9 @@ public:
     void sleep();
     void wake();
 
+    /** True when the display is currently in power-save mode. */
+    bool isSleeping() const { return _sleeping; }
+
 private:
     // U8g2 constructor for SSD1306 128×64, hardware I²C, full-buffer mode.
     // Change the first parameter to U8G2_SH1106_128X64_NONAME_F_HW_I2C for SH1106 panels.

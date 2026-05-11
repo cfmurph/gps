@@ -26,8 +26,8 @@ void DisplayManager::updateModem(const ModemStatus& m)     { _modemSnap = m;    
 void DisplayManager::refresh() {
     if (_sleeping) return;
 
-    // Auto-advance page
-    if (millis() - _lastPageSwitch >= DISPLAY_PAGE_CYCLE_MS) {
+    // Auto-advance page (unsigned subtraction handles millis() rollover)
+    if (static_cast<uint32_t>(millis() - _lastPageSwitch) >= DISPLAY_PAGE_CYCLE_MS) {
         uint8_t next = (static_cast<uint8_t>(_currentPage) + 1)
                        % static_cast<uint8_t>(DisplayPage::PAGE_COUNT);
         _currentPage    = static_cast<DisplayPage>(next);
@@ -132,7 +132,11 @@ void DisplayManager::_drawStats() {
     _u8g2.drawStr(0, 26, buf);
 
     const char* regStr = _modemSnap.registered ? "Online" : "Offline";
-    snprintf(buf, sizeof(buf), "LTE: %s  %d dBm", regStr, _modemSnap.rssi_dbm);
+    if (_modemSnap.rssi_dbm != 0) {
+        snprintf(buf, sizeof(buf), "LTE: %s  %d dBm", regStr, _modemSnap.rssi_dbm);
+    } else {
+        snprintf(buf, sizeof(buf), "LTE: %s  --", regStr);
+    }
     _u8g2.drawStr(0, 38, buf);
 
     snprintf(buf, sizeof(buf), "Pending TX: %u", _modemSnap.pending_records);
@@ -162,13 +166,12 @@ void DisplayManager::_drawBatteryIcon(uint8_t x, uint8_t y, uint8_t pct, bool ch
 }
 
 void DisplayManager::_drawSignalBars(uint8_t x, uint8_t y, int8_t rssi) {
-    // 4 bars, each 3 px wide; height increases left to right
-    // rssi 0 = unknown, -51..-70 = good, -71..-85 = fair, -86..-100 = poor
+    // 4 bars; rssi is in dBm (converted from CSQ); 0 = unknown
     uint8_t bars = 0;
-    if      (rssi != 0 && rssi >= -70) bars = 4;
-    else if (rssi >= -85)              bars = 3;
-    else if (rssi >= -100)             bars = 2;
-    else if (rssi != 0)                bars = 1;
+    if      (rssi != 0 && rssi >= -70) bars = 4;  // excellent
+    else if (rssi >= -85)              bars = 3;  // good
+    else if (rssi >= -100)             bars = 2;  // fair
+    else if (rssi != 0)                bars = 1;  // poor
 
     for (uint8_t i = 0; i < 4; i++) {
         uint8_t h = (i + 1) * 2;

@@ -31,7 +31,8 @@ struct BatteryStatus {
 /** Connectivity / uplink health reported by LteManager. */
 struct ModemStatus {
     bool    registered;      ///< Attached to a GPRS/LTE bearer
-    int8_t  rssi_dbm;        ///< Signal strength (negative; 0 = unknown)
+    int8_t  rssi_dbm;        ///< Signal strength in dBm (converted from CSQ); 0 = unknown
+    uint8_t csq;             ///< Raw AT+CSQ value [0–31]; 99 = unknown
     uint8_t pending_records; ///< Records waiting in QueueManager
 };
 

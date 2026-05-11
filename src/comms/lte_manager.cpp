@@ -129,8 +129,19 @@ RetryResult LteManager::postRecord(const GPSRecord& rec) {
 
 void LteManager::fillStatus(ModemStatus& out, uint8_t pendingRecords) {
     out.registered      = isConnected();
-    out.rssi_dbm        = static_cast<int8_t>(_modem.getSignalQuality());
     out.pending_records = pendingRecords;
+
+    // TinyGSM returns CSQ (AT+CSQ), not dBm. Convert per 3GPP TS 27.007:
+    //   dBm = -113 + (csq * 2)  for CSQ 0–30
+    //   CSQ 31 → -51 dBm (max)
+    //   CSQ 99 → unknown
+    const int csq = _modem.getSignalQuality();
+    out.csq = static_cast<uint8_t>(csq);
+    if (csq >= 0 && csq <= 31) {
+        out.rssi_dbm = static_cast<int8_t>(-113 + csq * 2);
+    } else {
+        out.rssi_dbm = 0;  // unknown
+    }
 }
 
 // ---------------------------------------------------------------------------
